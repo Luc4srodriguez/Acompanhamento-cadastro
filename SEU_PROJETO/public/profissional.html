@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Novetech · Desempenho Individual</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    /* ========================================
+       ESTILOS GERAIS
+       ======================================== */
+    :root {
+      --color-primary: #4F46E5;
+      --color-primary-dark: #4338CA;
+      --color-primary-light: #6366F1;
+      --color-dark: #1F2937;
+      --color-dark-alt: #111827;
+      --color-gray-900: #111827;
+      --color-gray-700: #374151;
+      --color-gray-500: #6B7280;
+      --color-gray-200: #E5E7EB;
+      --color-gray-100: #F3F4F6;
+      --color-gray-50: #F9FAFB;
+      --color-white: #ffffff;
+      --color-warning: #FFFBEB;
+      --color-warning-text: #92400E;
+      --color-danger: #FEF2F2;
+      --color-danger-text: #991B1B;
+      --border-color: var(--color-gray-200);
+      --border-radius: 10px;
+      --border-radius-sm: 6px;
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.07);
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--color-gray-50);
+      color: var(--color-gray-900);
+      line-height: 1.6;
+    }
+    
+    header {
+      background: linear-gradient(135deg, var(--color-dark) 0%, var(--color-dark-alt) 100%);
+      color: white;
+      padding: 1.5rem 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    .header-brand { display: flex; align-items: center; gap: 0.75rem; }
+    .header-brand h1 { font-size: 1.5rem; font-weight: 600; }
+    .header-subtitle { font-size: 0.875rem; opacity: 0.9; }
+    
+    .performance-container {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    
+    .professional-header {
+      background: linear-gradient(135deg, var(--color-primary-light) 0%, var(--color-primary) 100%);
+      color: white;
+      padding: 2rem;
+      border-radius: var(--border-radius);
+      margin-bottom: 2rem;
+      box-shadow: var(--shadow-md);
+    }
+    
+    .professional-header h1 { font-size: 2rem; margin-bottom: 0.5rem; font-weight: 600; }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    
+    .stat-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow-md);
+      border: 1px solid var(--border-color);
+      border-left: 4px solid var(--color-primary-light);
+      transition: transform 0.2s;
+    }
+    .stat-card:hover { transform: translateY(-2px); }
+    
+    .stat-card h3 {
+      font-size: 0.75rem;
+      color: var(--color-gray-500);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+    .stat-card .value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--color-gray-900);
+      line-height: 1;
+    }
+    
+    .chart-container, .data-table {
+      background: white;
+      padding: 2rem;
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow-md);
+      border: 1px solid var(--border-color);
+      margin-bottom: 2rem;
+    }
+    
+    .data-table { overflow-x: auto; }
+    
+    .data-table h2 {
+      font-size: 1.25rem;
+      margin-bottom: 1.5rem;
+      color: var(--color-gray-900);
+      font-weight: 600;
+    }
+    
+    .data-table table { width: 100%; border-collapse: collapse; }
+    
+    .data-table th, .data-table td {
+      padding: 0.875rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.875rem;
+      color: var(--color-gray-700);
+    }
+    
+    .data-table th {
+      background-color: var(--color-gray-50);
+      font-weight: 600;
+      color: var(--color-gray-500);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+    }
+    
+    .data-table tr:hover { background-color: var(--color-gray-50); }
+    
+    .error-message {
+      background: var(--color-danger);
+      color: var(--color-danger-text);
+      padding: 1.5rem;
+      border-radius: var(--border-radius);
+      border-left: 4px solid var(--color-danger-text);
+      margin: 2rem;
+    }
+    
+    .loading { text-align: center; padding: 3rem; color: var(--color-gray-500); }
+    
+    .loading-spinner {
+      display: inline-block; width: 40px; height: 40px;
+      border: 4px solid var(--color-gray-200);
+      border-top: 4px solid var(--color-primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1rem;
+    }
+    
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .micro-area-00 {
+      background-color: var(--color-warning) !important;
+      color: var(--color-warning-text) !important;
+      font-weight: 600;
+    }
+
+    .subtabs {
+      display:flex; gap:.5rem; margin:1rem 0 1.25rem 0;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 0.5rem;
+    }
+    .subtab-btn {
+      padding:.5rem 1rem;
+      border: 1px solid transparent;
+      border-bottom: 3px solid transparent;
+      border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
+      background: transparent;
+      cursor:pointer;
+      font-weight: 500;
+      color: var(--color-gray-500);
+      transition: all 0.2s ease;
+    }
+    .subtab-btn:hover { background: var(--color-gray-100); color: var(--color-gray-900); }
+    .tab-btn-active {
+      background: var(--color-white) !important;
+      color: var(--color-primary) !important;
+      border-color: var(--border-color) !important;
+      border-bottom-color: var(--color-primary) !important;
+      font-weight: 600;
+    }
+    
+    .kpi-ind, .table-ind { display: grid; }
+    .table-ind { display: block; }
+    .kpi-dom, .table-dom { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <div class="header-brand">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+        </svg>
+        <h1>Novetech</h1>
+      </div>
+      <p class="header-subtitle">Desempenho Individual</p>
+    </div>
+  </header>
+
+  <main class="performance-container">
+    <div id="content">
+      <div class="loading">
+        <div class="loading-spinner"></div>
+        <p>Carregando dados...</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ================= LÓGICA AVANÇADA DE DADOS =================
+    
+    const toDateBR = (d) => {
+        if (!d) return '';
+        const date = new Date(d);
+        return !isNaN(date.getTime()) ? date.toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '';
+    };
+
+    // --- LÓGICA DE SEPARAÇÃO CPF x SUS ---
+    const extractDocuments = (d) => {
+        const candidates = [d.cpf, d.cns, d.sus, d.documento]
+            .map(v => String(v || '').replace(/\D/g, ''))
+            .filter(v => v.length > 0);
+
+        const foundCPF = candidates.find(v => v.length === 11);
+        const foundSUS = candidates.find(v => v.length > 11);
+
+        return { foundCPF, foundSUS };
+    };
+
+    // --- MÁSCARAS ---
+
+    const mask3Digits = (val) => {
+        if (!val) return '-';
+        const s = String(val);
+        if (s.length < 3) return s;
+        return s.substring(0, 3) + '********'.substring(0, Math.min(8, s.length));
+    };
+
+    const maskDateYearOnly = (dateString) => {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return '';
+        return `**/**/${date.getFullYear()}`;
+    };
+
+    const maskResponsibleName = (name) => {
+        if (!name) return 'N/A';
+        const upper = name.toUpperCase();
+        if (upper.includes('NÃO IDENTIFICADO') || upper.includes('NAO IDENTIFICADO')) {
+            return name;
+        }
+        if (name.length <= 3) return name;
+        return name.substring(0, 3) + '**********';
+    };
+
+    // ========================================================
+
+    function bucket(months){
+      if(!Number.isFinite(months)) return 'Mais de 2 anos';
+      if(months <= 4) return 'Até 4 meses';
+      if(months <= 12) return '5 a 12 meses';
+      if(months <= 24) return '13 a 24 meses';
+      return 'Mais de 2 anos';
+    }
+    function bucketCategory(rawText, months) {
+      const s = String(rawText || '').toLowerCase();
+      if (/\bmais\s*de\s*2\s*ano/.test(s) || />\s*2\s*ano/.test(s) || /\b2\+\s*ano/.test(s)) {
+        return 'Mais de 2 anos';
+      }
+      return bucket(months);
+    }
+
+    async function loadProfessionalData() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionId = urlParams.get('id');
+
+      if (!sessionId) {
+        showError('Link inválido. Por favor, solicite um novo link.');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/session/${sessionId}`);
+        if (!response.ok) {
+            const err = await response.json();
+            showError(response.status === 404 ? 'Link expirado.' : 'Erro ao carregar dados.');
+            return;
+        }
+        const payload = await response.json();
+        if (!payload || !payload.dados) {
+             showError('Dados vazios ou corrompidos.');
+             return;
+        }
+        renderProfessionalPerformance(payload.dados);
+      } catch (e) {
+        console.error(e);
+        showError('Erro de conexão.');
+      }
+    }
+
+    function showError(message) {
+      document.getElementById('content').innerHTML = `
+        <div class="error-message"><h2>⚠️ Erro</h2><p>${message}</p></div>
+      `;
+    }
+
+    function renderProfessionalPerformance(data) {
+      if (!data || data.length === 0) {
+        showError('Nenhum dado encontrado.');
+        return;
+      }
+
+      const professionalName = data[0].acs || 'Profissional';
+      const unidade = data[0].estabelecimento || 'N/A';
+      
+      const individuosData = data.filter(d => d.tipo === 'individuo');
+      const domiciliosData = data.filter(d => d.tipo === 'domicilio');
+
+      // --- KPIS INDIVÍDUOS ---
+      const totalIndividuos = individuosData.length;
+      const individuosCriticos = individuosData.filter(d => (d.mesesSemAtualizar || 0) > 12).length;
+      
+      // CÁLCULO PORCENTAGEM INDIVÍDUOS (Até 4 meses)
+      const indEmDia = individuosData.filter(d => (d.mesesSemAtualizar || 0) <= 4).length;
+      const percIndEmDia = totalIndividuos > 0 ? Math.round((indEmDia / totalIndividuos) * 100) : 0;
+      
+      // --- KPIS DOMICÍLIOS ---
+      const totalDomicilios = domiciliosData.length;
+      const domiciliosCriticos = domiciliosData.filter(d => (d.mesesSemAtualizar || 0) > 12).length;
+
+      // CÁLCULO PORCENTAGEM DOMICÍLIOS (Até 4 meses)
+      const domEmDia = domiciliosData.filter(d => (d.mesesSemAtualizar || 0) <= 4).length;
+      const percDomEmDia = totalDomicilios > 0 ? Math.round((domEmDia / totalDomicilios) * 100) : 0;
+
+      // Gráfico
+      function calcularFaixasPorTipo(dataset){
+        const faixas = { 'Até 4 meses': 0, '5 a 12 meses': 0, '13 a 24 meses': 0, 'Mais de 2 anos': 0 };
+        (dataset || []).forEach(d => {
+          const category = bucketCategory(d.tempoSemAtualizar, d._monthsSince);
+          if (faixas[category] !== undefined) faixas[category]++;
+        });
+        return faixas;
+      }
+      const faixasIndividuos = calcularFaixasPorTipo(individuosData);
+      const faixasDomicilios = calcularFaixasPorTipo(domiciliosData);
+      
+      // HTML Base
+      let contentHTML = `
+        <div class="professional-header">
+          <h1>${professionalName}</h1>
+          <p>📍 Unidade: ${unidade}</p>
+        </div>
+
+        <div class="subtabs">
+          <button id="tabInd" type="button" class="subtab-btn tab-btn-active">Indivíduos</button>
+          <button id="tabDom" type="button" class="subtab-btn">Domicílios</button>
+        </div>
+
+        <div class="stats-grid kpi-ind">
+          <div class="stat-card"><h3>Total de Indivíduos</h3><div class="value">${totalIndividuos}</div></div>
+          <div class="stat-card"><h3>Indivíduos Críticos (>12m)</h3><div class="value">${individuosCriticos}</div></div>
+          
+          <div class="stat-card"><h3>% Atualizados (≤ 4 meses)</h3><div class="value">${percIndEmDia}%</div></div>
+        </div>
+
+        <div class="stats-grid kpi-dom">
+          <div class="stat-card"><h3>Total de Domicílios</h3><div class="value">${totalDomicilios}</div></div>
+          <div class="stat-card"><h3>Domicílios Críticos (>12m)</h3><div class="value">${domiciliosCriticos}</div></div>
+          
+          <div class="stat-card"><h3>% Atualizados (≤ 4 meses)</h3><div class="value">${percDomEmDia}%</div></div>
+        </div>
+
+        <div class="chart-container">
+          <h2>📊 Distribuição por Categoria de Atualização</h2>
+          <canvas id="categoryChart" style="max-height: 400px;"></canvas>
+        </div>
+      `;
+
+      // TABELA INDIVÍDUOS
+      if (individuosData.length > 0) {
+        contentHTML += `
+          <div class="data-table table-ind">
+            <h2>📋 Detalhes dos Indivíduos</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>CPF</th>
+                  <th>CNS (SUS)</th>
+                  <th>Nascimento</th>
+                  <th>Micro Área</th>
+                  <th>Última Atualização</th>
+                  <th>Meses sem Atualizar</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${individuosData.map(d => {
+                  const docs = extractDocuments(d);
+                  return `
+                  <tr class="${String(d.microArea).padStart(2, '0') === '00' ? 'micro-area-00' : ''}">
+                    <td>${d.nome || 'N/A'}</td>
+                    <td>${docs.foundCPF ? mask3Digits(docs.foundCPF) : '-'}</td>
+                    <td>${docs.foundSUS ? mask3Digits(docs.foundSUS) : '-'}</td>
+                    <td>${maskDateYearOnly(d.dataNascimento)}</td>
+                    <td>${d.microArea || 'N/A'}</td>
+                    <td>${toDateBR(d.ultimaAtualizacao) || 'N/A'}</td>
+                    <td><strong>${d.mesesSemAtualizar || 0}</strong></td>
+                  </tr>
+                `}).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      // TABELA DOMICÍLIOS
+      if (domiciliosData.length > 0) {
+        contentHTML += `
+          <div class="data-table table-dom">
+            <h2>🏠 Detalhes dos Domicílios</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Endereço</th>
+                  <th>Número</th>
+                  <th>Bairro</th>
+                  <th>Micro Área</th>
+                  <th>Responsável</th>
+                  <th>Data Cadastro</th>
+                  <th>Meses sem Atualizar</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${domiciliosData.map(d => `
+                  <tr class="${String(d.microArea).padStart(2, '0') === '00' ? 'micro-area-00' : ''}">
+                    <td>${d.endereco || 'N/A'}</td>
+                    <td>${d.numero || 'N/A'}</td>
+                    <td>${d.bairro || 'N/A'}</td>
+                    <td>${d.microArea || 'N/A'}</td>
+                    <td>${maskResponsibleName(d.responsavel)}</td>
+                    <td>${toDateBR(d.dataCadastro)}</td>
+                    <td><strong>${d.mesesSemAtualizar || 0}</strong></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      document.getElementById('content').innerHTML = contentHTML;
+
+      // Lógica do Gráfico e Abas
+      setTimeout(() => {
+        const canvas = document.getElementById('categoryChart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const labels = ['Até 4 meses','5 a 12 meses','13 a 24 meses','Mais de 2 anos'];
+        
+        function renderChartFor(type){
+          const faixas = (type === 'dom') ? faixasDomicilios : faixasIndividuos;
+          const datasetLabel = (type === 'dom') ? 'Domicílios' : 'Indivíduos';
+          const dataVals = labels.map(l => faixas[l]);
+          
+          if (window.__desempenhoChart) { try { window.__desempenhoChart.destroy(); } catch(e){} }
+          window.__desempenhoChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels,
+              datasets: [{
+                label: datasetLabel,
+                data: dataVals,
+                backgroundColor: ['#ECFDF5', '#EFF6FF', '#FFFBEB', '#FEF2F2'],
+                borderColor: ['#A7F3D0', '#BFDBFE', '#FDE68A', '#FECACA'],
+                borderWidth: 2,
+                borderRadius: 5
+              }]
+            },
+            options: {
+              responsive: true,
+              plugins: { legend: { display: false }, title: { display: false } },
+              scales: { y: { beginAtZero: true, grid: { color: '#F3F4F6' } }, x: { grid: { display: false } } }
+            }
+          });
+        }
+        
+        const tabInd = document.getElementById('tabInd');
+        const tabDom = document.getElementById('tabDom');
+
+        function activateInd(){
+          if (!tabInd || !tabDom) return;
+          tabInd.classList.add('tab-btn-active'); 
+          tabDom.classList.remove('tab-btn-active');
+          document.querySelectorAll('.kpi-ind, .table-ind').forEach(el=>el.style.display='grid'); 
+          document.querySelector('.table-ind').style.display='block';
+          document.querySelectorAll('.kpi-dom, .table-dom').forEach(el=>el.style.display='none');
+          renderChartFor('ind');
+        }
+        
+        function activateDom(){
+          if (!tabInd || !tabDom) return;
+          tabDom.classList.add('tab-btn-active'); 
+          tabInd.classList.remove('tab-btn-active');
+          document.querySelectorAll('.kpi-dom, .table-dom').forEach(el=>el.style.display='grid');
+          document.querySelector('.table-dom').style.display='block';
+          document.querySelectorAll('.kpi-ind, .table-ind').forEach(el=>el.style.display='none');
+          renderChartFor('dom');
+        }
+
+        if (tabInd && tabDom){
+          tabInd.addEventListener('click', activateInd);
+          tabDom.addEventListener('click', activateDom);
+        }
+        activateInd();
+      }, 100);
+    }
+
+    window.addEventListener('load', loadProfessionalData);
+  </script>
+</body>
+</html>
