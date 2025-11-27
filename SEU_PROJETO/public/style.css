@@ -750,6 +750,34 @@ tbody tr:last-child td {
   background: var(--color-white);
 }
 
+.geo-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  align-items: center;
+  margin: var(--spacing-md) 0;
+}
+
+.geo-nearest {
+  flex: 1;
+  min-width: 280px;
+}
+
+.destaque-gps {
+  border-color: var(--color-primary);
+  background: #ecfeff;
+}
+
+.destaque-gps h3 {
+  margin-top: 0;
+}
+
+.gps-hint {
+  margin: var(--spacing-sm) 0 0;
+  color: var(--color-gray-700);
+  font-size: 0.9rem;
+}
+
 /* ========================================
    GRÁFICOS
    ======================================== */
