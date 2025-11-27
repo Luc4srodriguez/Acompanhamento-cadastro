@@ -147,6 +147,21 @@ const BUCKET_CLASSES = {
 };
 const BUCKET_ORDER = ['Até 4 meses', '5 a 12 meses', '13 a 24 meses', 'Mais de 2 anos'];
 
+// ===== Geolocalização (Nominatim + cache local) =====
+const GEO_CACHE_KEY = 'cadastroGeoCache';
+const GEO_QUEUE_DELAY = 1200; // Respeita limites do Nominatim (mínimo ~1 req/seg)
+const NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_CONTACT_EMAIL = 'contato-cadastros@example.com';
+let geoCache = {};
+try {
+  geoCache = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || '{}');
+} catch (e) {
+  geoCache = {};
+}
+const geoQueue = [];
+let geoProcessing = false;
+const pendingGeoQueries = new Map();
+
 
 // ===== Utils =====
 const stripAccents = (s='') => s.normalize('NFD').replace(/\p{Diacritic}/gu, '');
@@ -198,6 +213,87 @@ const toDateBR = (d) => {
     const date = new Date(d);
     return !isNaN(date.getTime()) ? date.toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : '';
 };
+
+const persistGeoCache = () => {
+  try {
+    localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache));
+  } catch (e) {
+    console.warn('Não foi possível persistir o cache de geolocalização', e);
+  }
+};
+
+const buildGeoKey = (unidade) => norm(`${unidade || ''}|${currentMunicipality || ''}`);
+
+async function processGeoQueue() {
+  if (geoProcessing) return;
+  const next = geoQueue.shift();
+  if (!next) return;
+  geoProcessing = true;
+  try {
+    const url = `${NOMINATIM_ENDPOINT}?format=json&limit=1&addressdetails=0&q=${encodeURIComponent(next.query)}&email=${encodeURIComponent(NOMINATIM_CONTACT_EMAIL)}`;
+    const resp = await fetch(url, {
+      headers: {
+        'Accept-Language': 'pt-BR'
+      }
+    });
+    if (!resp.ok) throw new Error(`Falha ao consultar Nominatim (${resp.status})`);
+    const data = await resp.json();
+    if (!Array.isArray(data) || !data.length) throw new Error('Nenhum resultado de GPS encontrado para a unidade.');
+    const { lat, lon, display_name: displayName } = data[0];
+    next.resolve({ lat: Number(lat), lon: Number(lon), displayName: displayName || next.query, fetchedAt: Date.now(), query: next.query });
+  } catch (err) {
+    next.reject(err);
+  } finally {
+    setTimeout(() => {
+      geoProcessing = false;
+      processGeoQueue();
+    }, GEO_QUEUE_DELAY);
+  }
+}
+
+function enqueueGeocode(query) {
+  return new Promise((resolve, reject) => {
+    geoQueue.push({ query, resolve, reject });
+    processGeoQueue();
+  });
+}
+
+async function geocodeWithCache(unidade) {
+  if (!unidade) throw new Error('Nome da unidade não informado para geocodificação.');
+  const key = buildGeoKey(unidade);
+  if (geoCache[key]) return geoCache[key];
+
+  const queryParts = [unidade];
+  if (currentMunicipality) queryParts.push(currentMunicipality);
+  const query = queryParts.filter(Boolean).join(', ');
+
+  if (pendingGeoQueries.has(query)) return pendingGeoQueries.get(query);
+
+  const promise = enqueueGeocode(query)
+    .then((coord) => {
+      geoCache[key] = coord;
+      persistGeoCache();
+      return coord;
+    })
+    .finally(() => {
+      pendingGeoQueries.delete(query);
+    });
+
+  pendingGeoQueries.set(query, promise);
+  return promise;
+}
+
+function haversineDistanceKm(a, b) {
+  const R = 6371; // raio da Terra em Km
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
 
 const toDateInput = (d) => {
     if (!d) return '';
@@ -1641,7 +1737,7 @@ function gerarRelatorioPorProfissionalDom(dadosDom){
 
 function exibirDetalhesProfissional(profissional) {
   const d = document.getElementById('tab-detalhesProfissional'); d.innerHTML = `<h2>Detalhes do Profissional: ${profissional}</h2>`;
-  const dadosProfissional = dadosIndividuos.filter(ind => ind.acs === profissional); 
+  const dadosProfissional = dadosIndividuos.filter(ind => ind.acs === profissional);
   const dadosDomiciliosProfissional = dadosDomicilios.filter(dom => dom.acs === profissional);
   const u = dadosProfissional[0]?.estabelecimento || dadosDomiciliosProfissional[0]?.estabelecimento || 'N/I'; d.insertAdjacentHTML('beforeend', `<h3>Unidade: ${u}</h3>`);
   
@@ -1687,10 +1783,74 @@ function exibirDetalhesProfissional(profissional) {
   d.insertAdjacentHTML('beforeend', `<h3>Domicílios de ${profissional} (${dadosDomiciliosProfissional.length})</h3><div class="table-container"><table id="tableDomiciliosProfissional"><thead><tr><th>Logradouro</th><th>Nº</th><th>Bairro</th><th>Micro Área</th><th>Data Cadastro</th><th>Última Atualização</th></tr></thead><tbody></tbody></table></div>`);
   const tbodyDom = d.querySelector('#tableDomiciliosProfissional tbody'); tbodyDom.innerHTML = ''; dadosDomiciliosProfissional.forEach(item => { tbodyDom.insertAdjacentHTML('beforeend', `<tr><td>${item.endereco || ''}</td><td>${item.numero || ''}</td><td>${item.bairro || ''}</td><td>${item.microArea || ''}</td><td>${item.dataCadastroFormatada || ''}</td><td>${item.dataAtualizacaoFormatada || ''}</td></tr>`); });
 }
+
+async function verUnidadeMaisProxima(unidade, statusEl) {
+  const container = statusEl || document.getElementById('geoNearestBox');
+  if (!container) return;
+
+  const unidades = Array.from(new Set([...dadosIndividuos, ...dadosDomicilios].map(item => item.estabelecimento).filter(Boolean)));
+  if (!unidades.includes(unidade)) unidades.push(unidade);
+
+  if (unidades.length <= 1) {
+    container.innerHTML = `<div class="rel-card"><em>Não há unidades suficientes para calcular proximidade.</em></div>`;
+    return;
+  }
+
+  container.innerHTML = `<div class="rel-card"><strong>Calculando...</strong> Consultando coordenadas e armazenando em cache (localStorage).</div>`;
+
+  try {
+    const origem = await geocodeWithCache(unidade);
+    const distancias = [];
+
+    for (const outra of unidades) {
+      if (!outra || outra === unidade) continue;
+      try {
+        const coord = await geocodeWithCache(outra);
+        distancias.push({ unidade: outra, distancia: haversineDistanceKm(origem, coord) });
+      } catch (err) {
+        console.warn('Falha ao buscar coordenada de', outra, err);
+      }
+    }
+
+    if (!distancias.length) {
+      container.innerHTML = `<div class="rel-card"><em>Não foi possível obter coordenadas das demais unidades.</em></div>`;
+      return;
+    }
+
+    distancias.sort((a, b) => a.distancia - b.distancia);
+    const maisProxima = distancias[0];
+    container.innerHTML = `
+      <div class="rel-card destaque-gps">
+        <h3>Redistribuição sugerida</h3>
+        <p>A unidade mais próxima é <strong>${maisProxima.unidade}</strong> (~${maisProxima.distancia.toFixed(1)} Km).</p>
+        <p class="gps-hint">Dados obtidos automaticamente via Nominatim (OpenStreetMap) e cacheados no navegador.</p>
+      </div>`;
+  } catch (err) {
+    container.innerHTML = `<div class="rel-card"><strong>Não foi possível localizar a unidade.</strong><br><small>${err.message}</small></div>`;
+  }
+}
+
 function exibirDetalhesUnidade(unidade) {
   const d = document.getElementById('tab-detalhesUnidade'); d.innerHTML = `<h2>Detalhes da Unidade: ${unidade}</h2>`;
   const dadosIndividuosUnidade = dadosIndividuos.filter(ind => ind.estabelecimento === unidade);
   const dadosDomiciliosUnidade = dadosDomicilios.filter(dom => dom.estabelecimento === unidade);
+
+  d.insertAdjacentHTML('beforeend', `
+    <div class="geo-box">
+      <button id="btnAtualizarGPS" class="btn btn-secondary">Atualizar GPS</button>
+      <div id="geoNearestBox" class="geo-nearest" aria-live="polite">
+        <div class="rel-card">
+          <strong>Atualize GPS</strong>
+          <p>Usa Nominatim (OpenStreetMap) com fila e cache local para encontrar a unidade mais próxima sem precisar cadastrar coordenadas.</p>
+        </div>
+      </div>
+    </div>
+  `);
+  const geoStatus = d.querySelector('#geoNearestBox');
+  const geoBtn = d.querySelector('#btnAtualizarGPS');
+  if (geoBtn) {
+    geoBtn.addEventListener('click', () => verUnidadeMaisProxima(unidade, geoStatus));
+  }
 
   const histIndUnidade = {};
   dadosIndividuosUnidade.forEach(ind => {
