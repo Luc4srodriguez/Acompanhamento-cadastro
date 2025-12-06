@@ -1,730 +1,649 @@
-
-// vinculos.js - visão de vínculos da Gestão APS integrada ao Painel de Acompanhamento
+/**
+ * vinculos.js
+ * Painel de Vínculos por Equipe (APS)
+ * - Nível 1: Dashboard Geral
+ * - Nível 2: Modal por Unidade (Lista Equipes) - Gráfico + Tabela
+ * - Nível 3: Modal por Equipe (Lista Profissionais) - Gráfico + Tabela
+ */
 (function () {
   const g = (typeof window !== 'undefined' ? window : globalThis);
 
-  // --- PATCH: garantir que o INE seja lido a partir da planilha -----------------
-  (function patchINEParsing() {
-    try {
-      if (!g.HEADERS) return;
+  // Variáveis de controle de estado e gráficos
+  let listaEquipesModalAtual = [];
+  let chartModalEquipesInstance = null;       // Gráfico do Modal 1 (Equipes)
+  let chartModalProfissionaisInstance = null; // Gráfico do Modal 2 (Profissionais)
 
-      // Garante aliases para encontrar a coluna "INE" da planilha
-      if (!g.HEADERS.ine) {
-        g.HEADERS.ine = [
-          'ine',
-          'ine (equipe)',
-          'cód ine',
-          'codigo ine',
-          'código ine',
-          'ine equipe'
-        ];
-      }
+  // =========================
+  // 1) LÓGICA DO SEGUNDO POP-UP (PROFISSIONAIS)
+  // =========================
+  function criarModalProfissionaisSeNaoExistir() {
+    if (document.getElementById('modalProfissionaisOverlay')) return;
 
-      if (typeof g.buildHeaderMap !== 'function' ||
-          typeof g.getField !== 'function') {
-        return;
-      }
-
-      // Sobrescreve totalmente o parseCSVDataIndividuos para incluir o INE
-      g.parseCSVDataIndividuos = function parseCSVDataIndividuosComIne(data) {
-        const out = [];
-        const today = new Date();
-
-        for (const r of data || []) {
-          const headerMap = g.buildHeaderMap(r);
-
-          const acs = g.getField(r, headerMap, g.HEADERS.acs);
-          const estabelecimento = g.getField(r, headerMap, g.HEADERS.estabelecimento);
-          const nome = g.getField(r, headerMap, g.HEADERS.ind_nome);
-          const cpf = g.getField(r, headerMap, g.HEADERS.ind_cpf);
-          const sus = g.getField(r, headerMap, g.HEADERS.ind_sus);
-          const docPessoal =
-            g.getField(r, headerMap, g.HEADERS.ind_doc_pessoal) || cpf || sus;
-          const microArea = g.getField(r, headerMap, g.HEADERS.dom_micro);
-
-          // Novo: leitura direta da coluna INE
-          const ineRaw = g.HEADERS.ine
-            ? g.getField(r, headerMap, g.HEADERS.ine)
-            : (r.INE ?? r.ine ?? '');
-          const ine = (ineRaw || '').toString().trim();
-
-          const dataNascimentoRaw = g.getField(r, headerMap, g.HEADERS.ind_data_nasc);
-          const dataNascimento = g.parseDateFlexible
-            ? g.parseDateFlexible(dataNascimentoRaw)
-            : null;
-
-          const ultimaAtualizacaoRaw = g.getField(
-            r,
-            headerMap,
-            g.HEADERS.ind_ultima_atual
-          );
-          const ultimaAtualizacao = g.parseDateFlexible
-            ? g.parseDateFlexible(ultimaAtualizacaoRaw)
-            : null;
-
-          const tempoTxt = g.getField(r, headerMap, g.HEADERS.dom_tempo);
-
-          let mesesSemAtualizar = Infinity;
-          if (ultimaAtualizacao) {
-            const diffTime = Math.abs(today.getTime() - ultimaAtualizacao.getTime());
-            mesesSemAtualizar = Math.ceil(
-              diffTime / (1000 * 60 * 60 * 24 * 30.44)
-            );
-          }
-
-          const monthsSince = g.parseTempoToMonths
-            ? g.parseTempoToMonths(tempoTxt)
-            : Infinity;
-
-          if (!(nome || docPessoal)) continue;
-
-          out.push({
-            tipo: 'individuo',
-            acs,
-            estabelecimento,
-            nome,
-            cpf: docPessoal,
-            sus,
-            dataNascimento: dataNascimento ? dataNascimento.toISOString() : null,
-            dataNascimentoFormatada:
-              dataNascimento && g.toDateBR ? g.toDateBR(dataNascimento) : '',
-            ultimaAtualizacao: ultimaAtualizacao
-              ? ultimaAtualizacao.toISOString()
-              : null,
-            dataAtualizacaoFormatada:
-              ultimaAtualizacao && g.toDateBR ? g.toDateBR(ultimaAtualizacao) : '',
-            tempoSemAtualizar: tempoTxt,
-            mesesSemAtualizar,
-            _monthsSince: monthsSince,
-            microArea: microArea || '00',
-            ine
-          });
-        }
-
-        return out;
-      };
-    } catch (e) {
-      console.error('Falha ao aplicar patch de INE:', e);
-    }
-  })();
-
-  // --- Parâmetros oficiais por município (ajuste conforme portarias locais) ---
-  const PARAMETROS_MUNICIPIO = {
-    'AGUA PRETA':          { parametro_esf: 2500, limite_esf: 3750 },
-    'AGUAS BELAS':         { parametro_esf: 2500, limite_esf: 3750 },
-    'ALHANDRA':            { parametro_esf: 2500, limite_esf: 3750 },
-    'ALTO DO RODRIGUES':   { parametro_esf: 2000, limite_esf: 3000 },
-    'APODI':               { parametro_esf: 2500, limite_esf: 3750 },
-    'ARAPONGA':            { parametro_esf: 2000, limite_esf: 3000 },
-    'AREIA':               { parametro_esf: 2500, limite_esf: 3750 },
-    'ACU':                 { parametro_esf: 2750, limite_esf: 4125 },
-    'ASSU':                { parametro_esf: 2750, limite_esf: 4125 },
-    'BRUMADO':             { parametro_esf: 2750, limite_esf: 4125 },
-    'CAAPORA':             { parametro_esf: 2500, limite_esf: 3750 },
-    'CALDAS BRANDAO':      { parametro_esf: 2000, limite_esf: 3000 },
-    'CANAA':               { parametro_esf: 2000, limite_esf: 3000 },
-    'CONDE':               { parametro_esf: 2500, limite_esf: 3750 },
-    'CORDEIRO':            { parametro_esf: 2500, limite_esf: 3750 },
-    'GUARABIRA':           { parametro_esf: 2750, limite_esf: 4125 },
-    'ITABAIANA':           { parametro_esf: 2500, limite_esf: 3750 },
-    'ITAPOROROCA':         { parametro_esf: 2000, limite_esf: 3000 },
-    'ITATUBA':             { parametro_esf: 2000, limite_esf: 3000 },
-    'MOGEIRO':             { parametro_esf: 2000, limite_esf: 3000 },
-    'MACAIBA':             { parametro_esf: 2750, limite_esf: 4125 },
-    'PENDENCIAS':          { parametro_esf: 2000, limite_esf: 3000 },
-    'POCO BRANCO':         { parametro_esf: 2000, limite_esf: 3000 },
-    'SANTA RITA':          { parametro_esf: 3000, limite_esf: 4500 },
-    'SAO JOSE DE UBA':     { parametro_esf: 2000, limite_esf: 3000 },
-    'SAO MIGUEL DO ANTA':  { parametro_esf: 2000, limite_esf: 3000 },
-    'TIBAU':               { parametro_esf: 2000, limite_esf: 3000 },
-    'VALENCA':             { parametro_esf: 2750, limite_esf: 4125 },
-    'VICOSA':              { parametro_esf: 2750, limite_esf: 4125 }
-  };
-
-  const DEFAULT_PARAMS = { parametro_esf: 2500, limite_esf: 3750 };
-
-  function getNormFn() {
-    if (typeof g.norm === 'function') return g.norm;
-    return (s) =>
-      String(s || '')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/\p{Diacritic}/gu, '')
-        .replace(/[^\w\s-]/g, '');
-  }
-
-  
-function detectarParametrosPorStringsCandidatas() {
-    const norm = getNormFn();
-    const candidatos = [];
-
-    const pushCandidato = (v) => {
-      if (typeof v === 'string' && v.trim() !== '') {
-        candidatos.push(v);
-      }
-    };
-
-    // Alguns nomes comuns de variáveis que podem guardar o nome do município ou arquivo
-    pushCandidato(g.currentMunicipality);
-    pushCandidato(g.municipioAtual);
-    pushCandidato(g.nomeMunicipio);
-    pushCandidato(g.nomeArquivo);
-    pushCandidato(g.nomeArquivoBase);
-    pushCandidato(g.nomeArquivoIndividuos);
-    pushCandidato(g.nomeArquivoMunicipio);
-    pushCandidato(g.nomeArquivoUpload);
-
-    // Captura nomes de arquivos carregados em inputs type="file"
-    try {
-      if (typeof document !== 'undefined') {
-        const fileInputs = document.querySelectorAll('input[type="file"]');
-        fileInputs.forEach((inp) => {
-          const val = inp.value || inp.getAttribute('data-filename') || '';
-          if (typeof val === 'string' && val.trim() !== '') {
-            candidatos.push(val);
-          }
-        });
-      }
-    } catch (_) {
-      // se der erro aqui, apenas ignoramos e seguimos
-    }
-
-    // Varredura heurística em outras strings globais (limitando por segurança)
-    let count = 0;
-    for (const chave in g) {
-      if (count > 300) break;
-      try {
-        const val = g[chave];
-        if (typeof val === 'string') {
-          candidatos.push(val);
-          count++;
-        }
-      } catch (_) {
-        // ignore propriedades problemáticas
-      }
-    }
-
-    for (const texto of candidatos) {
-      const alvo = norm(texto);
-      for (const [nome, params] of Object.entries(PARAMETROS_MUNICIPIO)) {
-        if (alvo.includes(norm(nome))) {
-          return params;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  function obterParametrosMunicipioAtual() {
-    const norm = getNormFn();
-    const raw = g.currentMunicipality || '';
-    if (raw) {
-      const target = norm(raw);
-      for (const [nome, params] of Object.entries(PARAMETROS_MUNICIPIO)) {
-        if (target.includes(norm(nome))) {
-          return params;
-        }
-      }
-    }
-
-    // fallback: tenta descobrir pelo nome do arquivo ou outras strings globais
-    const heuristico = detectarParametrosPorStringsCandidatas();
-    if (heuristico) {
-      return heuristico;
-    }
-
-    return DEFAULT_PARAMS;
-  }
-
-  function extrairINE(text) {
-    const s = String(text || '');
-    const ineMatch = s.match(/\b(\d{7,8})\b/);
-    if (ineMatch) return ineMatch[1];
-    const ineWordMatch = s.match(/INE\s*[:\-]?\s*(\d+)/i);
-    if (ineWordMatch) return ineWordMatch[1];
-    return '';
-  }
-
-  // Calcula vínculos por equipe (unidade + INE), mas o gráfico será agregado por unidade.
-  function calcularVinculos(individuos) {
-    if (!Array.isArray(individuos) || !individuos.length) {
-      return { vinculos: [], parametroOficial: 0, limiteOficial: 0 };
-    }
-
-    const params = obterParametrosMunicipioAtual();
-    const parametroOficial = params.parametro_esf || DEFAULT_PARAMS.parametro_esf;
-    const limiteOficial = params.limite_esf || DEFAULT_PARAMS.limite_esf;
-
-    const porEquipe = new Map();
-
-    for (const row of individuos) {
-      const estabelecimento = row.estabelecimento || 'Sem estabelecimento';
-      const acs = row.acs || '';
-      const ineFromData = (row.ine || '').toString().trim();
-      const ineFromText = extrairINE(acs || estabelecimento);
-      const ine = ineFromData || ineFromText || '';
-
-      const equipeId = ine || acs || 'SEM_EQUIPES';
-      const key = `${estabelecimento}|||${equipeId}`;
-
-      const atual = porEquipe.get(key) || {
-        unidade: estabelecimento,
-        acs,
-        ine,
-        total: 0
-      };
-
-      atual.total += 1;
-      if (!atual.acs && acs) atual.acs = acs;
-      if (!atual.ine && ine) atual.ine = ine;
-
-      porEquipe.set(key, atual);
-    }
-
-    const vinculos = [];
-    for (const [, info] of porEquipe.entries()) {
-      const total = info.total;
-
-      const parametroEquipe = parametroOficial;
-      const limiteEquipe = limiteOficial;
-
-      let status = '✅ Dentro do Parâmetro';
-      if (total > limiteEquipe) {
-        status = '🚨 ACIMA DO LIMITE MÁXIMO';
-      } else if (total > parametroEquipe) {
-        status = '⚠️ Acima do Parâmetro';
-      }
-
-      vinculos.push({
-        unidade: info.unidade,
-        acs: info.acs,
-        equipeOriginal: info.acs ? `${info.acs} - ${info.unidade}` : info.unidade,
-        ine: info.ine || '',
-        total,
-        parametroEquipe,
-        limiteEquipe,
-        status
-      });
-    }
-
-    // ordena equipes da maior para a menor quantidade de pessoas vinculadas
-    vinculos.sort((a, b) => b.total - a.total);
-    return { vinculos, parametroOficial, limiteOficial };
-  }
-
-  let chartVinculos = null;
-  let chartVinculosEquipes = null;
-
-  function criarModalEquipes() {
-    let overlay = document.getElementById('modalVinculosOverlay');
-    if (overlay) return overlay;
-
-    overlay = document.createElement('div');
-    overlay.id = 'modalVinculosOverlay';
-    overlay.style.position = 'fixed';
-    overlay.style.inset = '0';
-    overlay.style.background = 'rgba(15, 23, 42, 0.55)';
-    overlay.style.display = 'none';
-    overlay.style.zIndex = '9999';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-
-    const dialog = document.createElement('div');
-    dialog.style.background = '#ffffff';
-    dialog.style.borderRadius = '0.75rem';
-    dialog.style.boxShadow = '0 20px 45px rgba(15,23,42,0.35)';
-    dialog.style.maxWidth = '720px';
-    dialog.style.width = '95%';
-    dialog.style.maxHeight = '80vh';
-    dialog.style.display = 'flex';
-    dialog.style.flexDirection = 'column';
-    dialog.style.padding = '1.5rem';
-
-    const header = document.createElement('div');
-    header.style.display = 'flex';
-    header.style.justifyContent = 'space-between';
-    header.style.alignItems = 'center';
-    header.style.marginBottom = '0.75rem';
-
-    const title = document.createElement('h3');
-    title.id = 'modalVinculosTitle';
-    title.textContent = 'Equipes da unidade';
-    title.style.fontSize = '1rem';
-    title.style.fontWeight = '600';
-    title.style.color = '#111827';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '×';
-    closeBtn.setAttribute('aria-label', 'Fechar');
-    closeBtn.style.fontSize = '1.25rem';
-    closeBtn.style.lineHeight = '1';
-    closeBtn.style.border = 'none';
-    closeBtn.style.background = 'transparent';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.onclick = () => {
-      overlay.style.display = 'none';
-    };
-
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-
-    const body = document.createElement('div');
-    body.id = 'modalVinculosBody';
-    body.style.overflow = 'auto';
-    body.style.borderTop = '1px solid #e5e7eb';
-    body.style.marginTop = '0.75rem';
-    body.style.paddingTop = '0.75rem';
-
-    dialog.appendChild(header);
-    dialog.appendChild(body);
-    overlay.appendChild(dialog);
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        overlay.style.display = 'none';
-      }
-    });
-
-    document.body.appendChild(overlay);
-    return overlay;
-  }
-
-  function mostrarEquipesDaUnidade(unidadeResumo) {
-    const overlay = criarModalEquipes();
-    const body = document.getElementById('modalVinculosBody');
-    const title = document.getElementById('modalVinculosTitle');
-
-    if (!body || !title) return;
-
-    title.textContent = `Equipes da unidade: ${unidadeResumo.unidade}`;
-
-    const equipes = (unidadeResumo.equipes || [])
-      .slice()
-      .sort((a, b) => b.total - a.total);
-
-    if (!equipes.length) {
-      body.innerHTML = '<p style="padding:0.5rem 0;">Nenhuma equipe encontrada para esta unidade.</p>';
-      overlay.style.display = 'flex';
-      return;
-    }
-
-    const linhas = equipes
-      .map((e) => `
-        <tr>
-          <td>${e.total.toLocaleString('pt-BR')}</td>
-          <td>${e.parametroEquipe}</td>
-          <td>${e.limiteEquipe}</td>
-          <td>${e.status}</td>
-        </tr>
-      `)
-      .join('');
-
-    body.innerHTML = `
-      <p style="font-size:0.875rem;color:#4b5563;margin-bottom:0.75rem;">
-        Detalhamento das equipes desta unidade. Cada barra do gráfico e cada linha representam uma equipe (INE)
-        e o total de pessoas com cadastro vinculado.
-      </p>
-      <div style="height:220px;margin-bottom:1rem;">
-        <canvas id="modalVinculosChart"></canvas>
+    const div = document.createElement('div');
+    div.id = 'modalProfissionaisOverlay';
+    div.className = 'modal-overlay hidden';
+    div.style.zIndex = '1100'; // Acima do primeiro modal
+    div.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+    
+    // Aumentei um pouco a largura para caber bem o gráfico
+    div.innerHTML = `
+      <div class="modal-content" style="max-width: 800px; width: 95%; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);">
+        <div class="modal-header" style="background: #fff; border-bottom: 1px solid #F3F4F6; padding: 1.5rem; display: flex; justify-content: space-between; align-items: start;">
+          <div>
+            <h2 id="modalProfissionaisTitle" style="color: #111827; font-size: 1.25rem; font-weight: 700; margin:0;">Profissionais</h2>
+            <p id="modalProfissionaisSubtitle" style="color: #6B7280; font-size: 0.9rem; margin: 4px 0 0 0;">Detalhes da equipe</p>
+          </div>
+          <button id="modalProfissionaisClose" style="cursor:pointer; border:none; background: #F3F4F6; color: #374151; width: 32px; height: 32px; font-size: 1.2rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s;">&times;</button>
+        </div>
+        <div id="modalProfissionaisBody" style="padding: 1.5rem; max-height: 70vh; overflow-y: auto; background: #fff;">
+        </div>
       </div>
-      <div style="overflow:auto;">
-        <table class="data-table">
+    `;
+    document.body.appendChild(div);
+
+    const closeBtn = document.getElementById('modalProfissionaisClose');
+    const overlay = document.getElementById('modalProfissionaisOverlay');
+    
+    const fechar = () => {
+       overlay.classList.add('hidden');
+       if (chartModalProfissionaisInstance) {
+           chartModalProfissionaisInstance.destroy();
+           chartModalProfissionaisInstance = null;
+       }
+    };
+    
+    closeBtn.onclick = fechar;
+    closeBtn.onmouseover = () => closeBtn.style.background = '#E5E7EB';
+    closeBtn.onmouseout = () => closeBtn.style.background = '#F3F4F6';
+    overlay.onclick = (e) => { if (e.target === overlay) fechar(); };
+  }
+
+  // Função Global chamada ao clicar na linha da Equipe
+  g.abrirModalProfissionais = function(index) {
+    criarModalProfissionaisSeNaoExistir();
+    
+    const equipe = listaEquipesModalAtual[index];
+    if (!equipe) return;
+
+    const overlay = document.getElementById('modalProfissionaisOverlay');
+    const title = document.getElementById('modalProfissionaisTitle');
+    const subtitle = document.getElementById('modalProfissionaisSubtitle');
+    const body = document.getElementById('modalProfissionaisBody');
+    
+    title.textContent = `Equipe INE: ${equipe.ine || 'Não informado'}`;
+    subtitle.textContent = `Total de ${equipe.total.toLocaleString('pt-BR')} pessoas vinculadas nesta equipe.`;
+
+    // Prepara dados para Gráfico e Tabela
+    // Converte o objeto de contagem em array e ordena
+    const listaProfissionais = Object.entries(equipe.acsCounts || {})
+      .map(([nome, qtd]) => ({ nome, qtd }))
+      .sort((a, b) => b.qtd - a.qtd);
+
+    if (listaProfissionais.length === 0) {
+       body.innerHTML = `<div style="text-align:center; padding:2rem; color:#6B7280;">Nenhum profissional identificado nominalmente.</div>`;
+       overlay.classList.remove('hidden');
+       return;
+    }
+
+    // HTML do Modal 2: Gráfico + Tabela
+    body.innerHTML = `
+      <p style="color: #6B7280; font-size: 0.9rem; margin-bottom: 1.5rem;">
+        Distribuição de vínculos por Agente Comunitário de Saúde (ACS).
+      </p>
+
+      <div style="height: 250px; width: 100%; margin-bottom: 2rem; position: relative;">
+         <canvas id="modalChartProfissionais"></canvas>
+      </div>
+
+      <div style="overflow-x: auto; border: 1px solid #E5E7EB; border-radius: 8px;">
+        <table style="width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif;">
           <thead>
-            <tr>
-              <th>Nº Pessoas Vinculadas</th>
-              <th>Parâmetro</th>
-              <th>Limite Máximo</th>
-              <th>Status</th>
+            <tr style="background-color: #F9FAFB; border-bottom: 1px solid #E5E7EB;">
+              <th style="text-align: left; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">Profissional (ACS)</th>
+              <th style="text-align: right; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">Pessoas Vinculadas</th>
+              <th style="text-align: right; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">% da Equipe</th>
             </tr>
           </thead>
-          <tbody>
-            ${linhas}
+          <tbody style="background-color: #fff;">
+            ${listaProfissionais.map(prof => {
+                const percent = ((prof.qtd / equipe.total) * 100).toFixed(1);
+                return `
+                  <tr style="border-bottom: 1px solid #F3F4F6;">
+                    <td style="padding: 12px 16px; color: #111827; font-size: 0.875rem; font-weight: 500;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <div style="width:24px; height:24px; background:#EEF2FF; color:#4F46E5; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700;">
+                                ${prof.nome.charAt(0).toUpperCase()}
+                            </div>
+                            ${prof.nome}
+                        </div>
+                    </td>
+                    <td style="padding: 12px 16px; text-align: right; color: #111827; font-weight: 600;">${prof.qtd.toLocaleString('pt-BR')}</td>
+                    <td style="padding: 12px 16px; text-align: right; color: #6B7280;">${percent}%</td>
+                  </tr>
+                `;
+            }).join('')}
           </tbody>
         </table>
       </div>
     `;
 
-    overlay.style.display = 'flex';
+    overlay.classList.remove('hidden');
 
-    // Garante que o Chart.js está disponível (já foi usado no gráfico principal)
-    if (typeof Chart === 'undefined') {
-      console.error('Chart.js não está carregado para o gráfico de equipes.');
-      return;
-    }
+    // Renderiza o Gráfico de Profissionais
+    setTimeout(() => {
+        const canvas = document.getElementById('modalChartProfissionais');
+        if (canvas) {
+            if (chartModalProfissionaisInstance) chartModalProfissionaisInstance.destroy();
+            
+            const labels = listaProfissionais.map(p => p.nome);
+            const dataValues = listaProfissionais.map(p => p.qtd);
 
-    const canvas = document.getElementById('modalVinculosChart');
-    if (!canvas) return;
-
-    if (chartVinculosEquipes) {
-      try {
-        chartVinculosEquipes.destroy();
-      } catch (e) { /* ignore */ }
-      chartVinculosEquipes = null;
-    }
-
-    const labels = equipes.map((e) => e.ine || e.acs || 'Equipe');
-    const data = equipes.map((e) => e.total);
-
-    chartVinculosEquipes = new Chart(canvas.getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Pessoas vinculadas (por equipe)',
-          data,
-          borderWidth: 1,
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (ctx) {
-                const idx = ctx.dataIndex;
-                const e = equipes[idx];
-                return [
-                  `INE: ${e.ine || '-'}`,
-                  `Total vinculados: ${e.total.toLocaleString('pt-BR')}`,
-                  `Status: ${e.status}`
-                ];
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            beginAtZero: true,
-            ticks: {
-              callback: (value) => value.toLocaleString('pt-BR')
-            }
-          }
+            chartModalProfissionaisInstance = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Pessoas Vinculadas',
+                        data: dataValues,
+                        backgroundColor: '#93C5FD', // Mesmo azul
+                        borderColor: '#60A5FA',
+                        borderWidth: 1,
+                        barPercentage: 0.6,
+                        categoryPercentage: 0.8
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { beginAtZero: true, grid: { color: '#F3F4F6' } },
+                        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                    }
+                }
+            });
         }
-      }
-    });
-  }
-
-  async function atualizarPainelVinculos(individuosFiltrados) {
-    const totalEqEl  = document.getElementById('kpiVinculosTotalEquipes');
-    const totalCidEl = document.getElementById('kpiVinculosTotalCidadaos');
-    const mediaEl    = document.getElementById('kpiVinculosMediaPorEquipe');
-    const critEl     = document.getElementById('kpiVinculosEquipesAcimaLimite');
-    const canvas     = document.getElementById('chartVinculos');
-    const tabelaBody = document.querySelector('#tabelaVinculos tbody');
-    const tabelaHeadRow = document.querySelector('#tabelaVinculos thead tr');
-
-    if (!totalEqEl || !canvas || !tabelaBody) {
-      return;
-    }
-
-    // Ajusta o cabeçalho para exibir apenas unidades (sem coluna de equipe/INE)
-    if (tabelaHeadRow && !tabelaHeadRow.dataset.vinculosUnidade) {
-      tabelaHeadRow.dataset.vinculosUnidade = '1';
-      tabelaHeadRow.innerHTML = `
-        <th>Unidade de Saúde</th>
-        <th>Nº Pessoas Vinculadas</th>
-        <th>Parâmetro</th>
-        <th>Limite Máximo</th>
-        <th>Status</th>
-      `;
-    }
-
-    const base = Array.isArray(individuosFiltrados) && individuosFiltrados.length
-      ? individuosFiltrados
-      : (g.dadosIndividuos || []);
-
-    const { vinculos, parametroOficial, limiteOficial } = calcularVinculos(base);
-
-    // Agrupa por unidade para o gráfico e para a tabela
-    const porUnidadeMap = new Map();
-    for (const v of vinculos) {
-      const atual = porUnidadeMap.get(v.unidade) || {
-        unidade: v.unidade,
-        total: 0,
-        equipes: []
-      };
-
-      atual.total += v.total;
-      atual.equipes.push(v);
-
-      porUnidadeMap.set(v.unidade, atual);
-    }
-
-    // Calcula o status da UNIDADE com base no total agregado x parâmetro/limite
-    const unidadesResumo = Array.from(porUnidadeMap.values())
-      .map((u) => {
-        let statusUnidade = '✅ Dentro do Parâmetro';
-        if (u.total > limiteOficial) {
-          statusUnidade = '🚨 ACIMA DO LIMITE MÁXIMO';
-        } else if (u.total > parametroOficial) {
-          statusUnidade = '⚠️ Acima do Parâmetro';
-        }
-        return { ...u, statusMax: statusUnidade };
-      })
-      .sort((a, b) => b.total - a.total);
-
-    const totalEquipes = vinculos.length;
-    const totalCidadaos = vinculos.reduce((s, v) => s + v.total, 0);
-    const mediaPorEquipe = totalEquipes ? (totalCidadaos / totalEquipes) : 0;
-
-    // Agora conta UNIDADES acima do limite (e não equipes isoladas)
-    const unidadesAcimaLimite = unidadesResumo.filter(
-      (u) => u.statusMax === '🚨 ACIMA DO LIMITE MÁXIMO'
-    ).length;
-
-    totalEqEl.textContent  = totalEquipes.toLocaleString('pt-BR');
-    totalCidEl.textContent = totalCidadaos.toLocaleString('pt-BR');
-    mediaEl.textContent    = mediaPorEquipe.toFixed(1).replace('.', ',');
-    critEl.textContent     = unidadesAcimaLimite.toLocaleString('pt-BR');
-
-
-    // --- Tabela: detalhamento por unidade (apenas unidades) -------------------
-    tabelaBody.innerHTML = '';
-    for (const u of unidadesResumo) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${u.unidade}</td>
-        <td>${u.total.toLocaleString('pt-BR')}</td>
-        <td>${parametroOficial}</td>
-        <td>${limiteOficial}</td>
-        <td>${u.statusMax}</td>
-      `;
-      tabelaBody.appendChild(tr);
-    }
-
-    // Destroi gráfico anterior (se existir)
-    if (chartVinculos) {
-      try {
-        chartVinculos.destroy();
-      } catch (e) { /* ignore */ }
-      chartVinculos = null;
-    }
-
-    if (!unidadesResumo.length) {
-      return;
-    }
-
-    try {
-      if (typeof ensureGlobal === 'function' && typeof CDN !== 'undefined') {
-        await ensureGlobal('Chart', CDN.Chart);
-      }
-    } catch (e) {
-      console.error('Chart.js não disponível para o gráfico de vínculos.', e);
-      return;
-    }
-
-    if (typeof Chart === 'undefined') {
-      console.error('Chart.js não está carregado.');
-      return;
-    }
-
-    const labels = unidadesResumo.map(u => u.unidade);
-    const data   = unidadesResumo.map(u => u.total);
-    const coresStatus = {
-      '✅ Dentro do Parâmetro': '#22c55e',
-      '⚠️ Acima do Parâmetro': '#eab308',
-      '🚨 ACIMA DO LIMITE MÁXIMO': '#ef4444'
-    };
-    const backgroundColors = unidadesResumo.map(u => coresStatus[u.statusMax] || '#4b5563');
-
-    // Ajusta altura dinamicamente para não "bugar" com muitas unidades
-    const baseAltura = 24;
-    const alturaMin = 260;
-    const alturaDesejada = Math.max(alturaMin, labels.length * baseAltura);
-    canvas.style.height = alturaDesejada + 'px';
-    canvas.height = alturaDesejada;
-
-    const ctx = canvas.getContext('2d');
-    chartVinculos = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Total de pessoas vinculadas por unidade',
-          data,
-          backgroundColor: backgroundColors,
-          borderColor: '#111827',
-          borderWidth: 1,
-          borderRadius: 6,
-          maxBarThickness: 32
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        layout: {
-          padding: { top: 10, right: 24, bottom: 10, left: 10 }
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (context) {
-                const idx = context.dataIndex;
-                const u = unidadesResumo[idx];
-                const totalEquipes = u.equipes.length;
-                const total = u.total.toLocaleString('pt-BR');
-                return [
-                  `Total vinculados: ${total}`,
-                  `Nº de equipes: ${totalEquipes}`,
-                  `Status crítico na unidade: ${u.statusMax}`
-                ];
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            beginAtZero: true,
-            ticks: {
-              callback: (value) => value.toLocaleString('pt-BR')
-            }
-          },
-          y: {
-            ticks: {
-              autoSkip: labels.length > 20,
-              maxTicksLimit: 20,
-              maxRotation: 0,
-              minRotation: 0,
-              callback: function(value, index, ticks) {
-                // Em escalas de categoria, "value" é o valor da escala, não o índice,
-                // então usamos getLabelForValue para recuperar o rótulo correto.
-                const label = this.getLabelForValue
-                  ? this.getLabelForValue(value)
-                  : (labels[index] || labels[value] || '');
-                if (!label) return '';
-                return label.length > 40 ? label.substring(0, 37) + '...' : label;
-              }
-            }
-          }
-        },
-        onClick: (evt, elements) => {
-          if (!elements || !elements.length) return;
-          const idx = elements[0].index;
-          const unidadeResumo = unidadesResumo[idx];
-          if (unidadeResumo) {
-            mostrarEquipesDaUnidade(unidadeResumo);
-          }
-        }
-      }
-    });
-  }
-
-  // Integra com o dashboard principal já existente
-  const originalGerarDashboard = g.gerarDashboard;
-  g.gerarDashboard = function (individuosFiltrados, domiciliosFiltrados) {
-    if (typeof originalGerarDashboard === 'function') {
-      originalGerarDashboard.call(this, individuosFiltrados, domiciliosFiltrados);
-    }
-    try {
-      atualizarPainelVinculos(individuosFiltrados);
-    } catch (e) {
-      console.error('Erro ao atualizar painel de vínculos:', e);
-    }
+    }, 50);
   };
+
+  // =========================
+  // 2) PATCH E LEITURA (MANTIDO)
+  // =========================
+  try {
+    if (typeof HEADERS === 'object' && HEADERS && !HEADERS.ine) {
+      HEADERS.ine = ['ine', 'codigo ine', 'código ine', 'ine (equipe)', 'ine equipe', 'ine da equipe'];
+    }
+  } catch (e) { console.warn('HEADERS não disponível:', e); }
+
+  try {
+    if (typeof buildHeaderMap === 'function' && typeof getField === 'function') {
+      function parseCSVDataIndividuos(data) {
+        const out = [];
+        const today = new Date();
+        for (const r of data) {
+          const headerMap = buildHeaderMap(r);
+          const acs = getField(r, headerMap, HEADERS.acs);
+          const estabelecimento = getField(r, headerMap, HEADERS.estabelecimento);
+          const nome = getField(r, headerMap, HEADERS.ind_nome);
+          const cpf = getField(r, headerMap, HEADERS.ind_cpf);
+          const sus = getField(r, headerMap, HEADERS.ind_sus);
+          const docPessoal = getField(r, headerMap, HEADERS.ind_doc_pessoal) || cpf || sus;
+          const microArea = getField(r, headerMap, HEADERS.dom_micro);
+          const ineCol = HEADERS.ine ? getField(r, headerMap, HEADERS.ine) : '';
+          const dataNascimentoRaw = getField(r, headerMap, HEADERS.ind_data_nasc);
+          const dataNascimento = parseDateFlexible(dataNascimentoRaw);
+          const ultimaAtualizacaoRaw = getField(r, headerMap, HEADERS.ind_ultima_atual);
+          const ultimaAtualizacao = parseDateFlexible(ultimaAtualizacaoRaw);
+          const tempoTxt = getField(r, headerMap, HEADERS.dom_tempo);
+          
+          let mesesSemAtualizar = Infinity;
+          if (ultimaAtualizacao) {
+            const diffTime = Math.abs(today.getTime() - ultimaAtualizacao.getTime());
+            mesesSemAtualizar = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 30.44));
+          }
+          const monthsSince = parseTempoToMonths(tempoTxt);
+
+          if (!(nome || docPessoal)) continue;
+
+          let ine = '';
+          if (ineCol != null) {
+            const s = String(ineCol).trim();
+            if (s) { const digits = s.replace(/\D/g, ''); ine = digits || s; }
+          }
+
+          out.push({
+            tipo: 'individuo',
+            acs: acs,
+            estabelecimento: estabelecimento,
+            ine: ine,
+            nome: nome,
+            cpf: docPessoal,
+            sus: sus,
+            dataNascimento: dataNascimento ? dataNascimento.toISOString() : null,
+            dataNascimentoFormatada: dataNascimento ? toDateBR(dataNascimento) : '',
+            ultimaAtualizacao: ultimaAtualizacao ? ultimaAtualizacao.toISOString() : null,
+            dataAtualizacaoFormatada: ultimaAtualizacao ? toDateBR(ultimaAtualizacao) : '',
+            tempoSemAtualizar: tempoTxt,
+            mesesSemAtualizar: mesesSemAtualizar,
+            _monthsSince: monthsSince,
+            microArea: microArea || '00'
+          });
+        }
+        return out;
+      }
+      g.parseCSVDataIndividuos = parseCSVDataIndividuos;
+    }
+  } catch (e) { console.error('Erro no patch:', e); }
+
+  // =========================
+  // 3) PARÂMETROS E DETECÇÃO (MANTIDO)
+  // =========================
+  let municipioDetectado = null;
+  function extrairMunicipioDoNomeArquivo(nomeArquivo) {
+    if (!nomeArquivo) return null;
+    const nomeSemExtensao = nomeArquivo.replace(/\.[^/.]+$/, "");
+    const partes = nomeSemExtensao.split('_');
+    if (partes.length > 0) return partes[0].trim().replace(/["']/g, '');
+    return null;
+  }
+  function normalizarMunicipioNome(nome) {
+    if (!nome) return null;
+    return String(nome).normalize('NFD').replace(/\p{Diacritic}/gu, '').toUpperCase().trim(); 
+  }
+  function detectarMunicipio() {
+    try {
+      const i1 = document.getElementById('fileInputIndividuos');
+      if (i1?.files?.length) { const m = extrairMunicipioDoNomeArquivo(i1.files[0].name); if (m) { municipioDetectado = m; return m; } }
+      const i2 = document.getElementById('fileInputDomicilios');
+      if (i2?.files?.length) { const m = extrairMunicipioDoNomeArquivo(i2.files[0].name); if (m) { municipioDetectado = m; return m; } }
+      if (g.currentMunicipality || g.currentMunicipio) return g.currentMunicipality || g.currentMunicipio;
+      return null;
+    } catch (e) { return null; }
+  }
+
+  const VINCULOS_PARAMS = {
+    'PADRAO': { parametro_esf: 3000, limite_esf: 4000, nome: 'Padrão' },
+    'AGUA PRETA': { parametro_esf: 2500, limite_esf: 3750, nome: 'ÁGUA PRETA-PE' },
+    'AGUAS BELAS': { parametro_esf: 2500, limite_esf: 3750, nome: 'ÁGUAS BELAS-PE' },
+    'ALTO DO RODRIGUES': { parametro_esf: 2000, limite_esf: 3000, nome: 'ALTO DO RODRIGUES-RN' },
+    'APODI': { parametro_esf: 2500, limite_esf: 3750, nome: 'APODI-RN' },
+    'ARAPONGA': { parametro_esf: 2000, limite_esf: 3000, nome: 'ARAPONGA-MG' },
+    'AREIA': { parametro_esf: 2500, limite_esf: 3750, nome: 'AREIA-PB' },
+    'ACU': { parametro_esf: 2750, limite_esf: 4125, nome: 'AÇU-RN' },
+    'BRUMADO': { parametro_esf: 2750, limite_esf: 4125, nome: 'BRUMADO-BA' },
+    'CAAPORA': { parametro_esf: 2500, limite_esf: 3750, nome: 'CAAPORÃ-PB' },
+    'CALDAS BRANDAO': { parametro_esf: 2000, limite_esf: 3000, nome: 'CALDAS BRANDÃO-PB' },
+    'CANAA': { parametro_esf: 2000, limite_esf: 3000, nome: 'CANAÃ-MG' },
+    'CARNAUBAIS': { parametro_esf: 2000, limite_esf: 3000, nome: 'CARNAUBAIS-RN' },
+    'CONDE': { parametro_esf: 2500, limite_esf: 3750, nome: 'CONDE-PB' },
+    'CORDEIRO': { parametro_esf: 2500, limite_esf: 3750, nome: 'CORDEIRO-RJ' },
+    'FERNANDO PEDROZA': { parametro_esf: 2000, limite_esf: 3000, nome: 'FERNANDO PEDROZA-RN' },
+    'GROSSOS': { parametro_esf: 2000, limite_esf: 3000, nome: 'GROSSOS-RN' },
+    'GUARABIRA': { parametro_esf: 2750, limite_esf: 4125, nome: 'GUARABIRA-PB' },
+    'ITABAIANA': { parametro_esf: 2500, limite_esf: 3750, nome: 'ITABAIANA-PB' },
+    'ITAPOROROCA': { parametro_esf: 2000, limite_esf: 3000, nome: 'ITAPOROROCA-PB' },
+    'ITATUBA': { parametro_esf: 2000, limite_esf: 3000, nome: 'ITATUBA-PB' },
+    'MACAIBA':{parametro_esf:2500, limite_esf: 3750, nome: 'MACAIBA-RN' },   
+    'MOGEIRO': { parametro_esf: 2000, limite_esf: 3000, nome: 'MOGEIRO-PB' },
+    'PATU': { parametro_esf: 2000, limite_esf: 3000, nome: 'PATU-RN' },
+    'PITIMBU': { parametro_esf: 2000, limite_esf: 3000, nome: 'PITIMBU-PB' },
+    'PAULA CANDIDO': { parametro_esf: 2000, limite_esf: 3000, nome: 'PAULA CÂNDIDO-MG' },
+    'PEDRO VELHO': { parametro_esf: 2000, limite_esf: 3000, nome: 'PEDRO VELHO-RN' },
+    'PENDENCIAS': { parametro_esf: 2000, limite_esf: 3000, nome: 'PENDÊNCIAS-RN' },
+    'POCO BRANCO': { parametro_esf: 2000, limite_esf: 3000, nome: 'POÇO BRANCO-RN' },
+    'SANTA RITA': { parametro_esf: 3000, limite_esf: 4500, nome: 'SANTA RITA-PB' },
+    'SAO JOSE DE UBA': { parametro_esf: 2000, limite_esf: 3000, nome: 'SÃO JOSÉ DE UBÁ-RJ' },
+    'SAO MIGUEL DO ANTA': { parametro_esf: 2000, limite_esf: 3000, nome: 'SÃO MIGUEL DO ANTA-MG' },
+    'TIBAU': { parametro_esf: 2000, limite_esf: 3000, nome: 'TIBAU-RN' },
+    'VICOSA': { parametro_esf: 2750, limite_esf: 4125, nome: 'VIÇOSA-MG' },
+    'VICOSA DO CEARA': { parametro_esf: 2750, limite_esf: 4125, nome: 'VIÇOSA DO CEARÁ-CE' }
+  };
+
+  function obterParametrosMunicipioAtual() {
+    const municipioRaw = detectarMunicipio();
+    const chave = normalizarMunicipioNome(municipioRaw);
+    if (chave && VINCULOS_PARAMS[chave]) return VINCULOS_PARAMS[chave];
+    if (chave) {
+      const chaveComEspaco = chave.replace(/_/g, ' ');
+      if (VINCULOS_PARAMS[chaveComEspaco]) return VINCULOS_PARAMS[chaveComEspaco];
+    }
+    return VINCULOS_PARAMS.PADRAO;
+  }
+
+  function extrairINE(texto) {
+    if (!texto) return '';
+    const s = String(texto);
+    const m = s.match(/\b\d{6,8}\b/);
+    return m ? m[0] : '';
+  }
+
+  function normalizarIneValor(val) {
+    if (val == null) return '';
+    const s = String(val).trim();
+    if (!s) return '';
+    const digits = s.replace(/\D/g, '');
+    return digits || s;
+  }
+
+  // =========================
+  // 4) CÁLCULO
+  // =========================
+  function calcularVinculos(individuos) {
+    if (!Array.isArray(individuos) || individuos.length === 0) {
+      return { vinculos: [], parametroOficial: 0, limiteOficial: 0, municipioNome: 'Não identificado' };
+    }
+
+    const params = obterParametrosMunicipioAtual();
+    const parametroOficial = params.parametro_esf || 3000;
+    const limiteOficial = params.limite_esf || 4000;
+    const municipioNome = params.nome || 'Município';
+
+    const porEquipe = new Map();
+
+    for (const row of individuos) {
+      if (!row || row.tipo !== 'individuo') continue;
+      const unidade = row.estabelecimento || 'Sem estabelecimento';
+      const ineCol = normalizarIneValor(row.ine);
+      const ineGuess = extrairINE(row.acs || row.estabelecimento || '');
+      const ine = ineCol || ineGuess;
+      const equipeId = ine || (row.acs ? String(row.acs) : '(Equipe não informada)');
+      const key = `${unidade}|||${equipeId}`;
+
+      let atual = porEquipe.get(key);
+      if (!atual) {
+        // Agora inicializamos também o acsCounts
+        atual = { unidade, ine, equipeId, total: 0, acsSet: new Set(), acsCounts: {} };
+        porEquipe.set(key, atual);
+      }
+      atual.total += 1;
+      
+      const acsName = row.acs || 'Não Informado';
+      atual.acsSet.add(acsName);
+      
+      // Contagem individual por ACS para o gráfico
+      atual.acsCounts[acsName] = (atual.acsCounts[acsName] || 0) + 1;
+    }
+
+    const vinculos = [];
+    porEquipe.forEach((info) => {
+      const total = info.total;
+      let status = 'Dentro do Parâmetro';
+      let statusClasse = 'status-dentro';
+      if (total > limiteOficial) {
+        status = 'Acima do Limite';
+        statusClasse = 'status-acima-limite';
+      } else if (total > parametroOficial) {
+        status = 'Acima do Parâmetro';
+        statusClasse = 'status-acima-parametro';
+      }
+      vinculos.push({
+        unidade: info.unidade, ine: info.ine || '', acs: Array.from(info.acsSet || []),
+        acsCounts: info.acsCounts, // Passa a contagem adiante
+        equipeOriginal: info.equipeId, total, parametroEquipe: parametroOficial,
+        limiteEquipe: limiteOficial, status, statusClasse
+      });
+    });
+
+    vinculos.sort((a, b) => b.total - a.total);
+    return { vinculos, parametroOficial, limiteOficial, municipioNome };
+  }
+
+  // =========================
+  // 5) DASHBOARD GERAL
+  // =========================
+  let chartVinculos = null;
+  let chartVinculosFull = null;
+  let vinculosChartCache = { unidades: [], labels: [], dataTotal: [], cores: [] };
+
+  function atualizarPainelVinculos(individuosFiltrados) {
+    try {
+      const totalEqEl = document.getElementById('kpiVinculosTotalEquipes');
+      const totalCidEl = document.getElementById('kpiVinculosTotalCidadaos');
+      const mediaEqEl = document.getElementById('kpiVinculosMediaPorEquipe');
+      const eqAcimaEl = document.getElementById('kpiVinculosEquipesAcimaLimite');
+      const canvas = document.getElementById('chartVinculos');
+      const tabelaBody = document.querySelector('#tabelaVinculos tbody');
+      const chartHeader = document.querySelector('#tab-vinculos .dashboard-chart-header h3');
+      const chartDescription = document.querySelector('#tab-vinculos .dashboard-chart-header p');
+
+      if (!totalEqEl || !canvas || !tabelaBody) return;
+
+      const base = Array.isArray(individuosFiltrados) && individuosFiltrados.length ? individuosFiltrados : (g.dadosIndividuos || []);
+      const { vinculos, parametroOficial, limiteOficial, municipioNome } = calcularVinculos(base);
+
+      if (chartHeader) chartHeader.textContent = `Vínculos por Equipe - ${municipioNome}`;
+      if (chartDescription) chartDescription.textContent = `Parâmetro: ${parametroOficial.toLocaleString('pt-BR')} | Limite: ${limiteOficial.toLocaleString('pt-BR')}`;
+
+      const totalEquipes = vinculos.length;
+      const totalCidadaos = vinculos.reduce((sum, v) => sum + v.total, 0);
+      const mediaPorEquipe = totalEquipes > 0 ? (totalCidadaos / totalEquipes) : 0;
+      const equipesAcimaLimite = vinculos.filter(v => v.total > v.limiteEquipe).length;
+
+      totalEqEl.textContent = totalEquipes.toLocaleString('pt-BR');
+      totalCidEl.textContent = totalCidadaos.toLocaleString('pt-BR');
+      mediaEqEl.textContent = mediaPorEquipe.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+      eqAcimaEl.textContent = equipesAcimaLimite.toLocaleString('pt-BR');
+
+      tabelaBody.innerHTML = '';
+      if (vinculos.length === 0) tabelaBody.innerHTML = '<tr><td colspan="6">Nenhuma equipe encontrada.</td></tr>';
+      
+      const resumoPorUnidade = new Map();
+      for (const v of vinculos) {
+        const key = v.unidade || 'Sem unidade';
+        let info = resumoPorUnidade.get(key);
+        if (!info) { info = { unidade: key, totalCidadaos: 0, equipes: [], acimaLimite: 0, acimaParametro: 0, dentroParametro: 0 }; resumoPorUnidade.set(key, info); }
+        info.totalCidadaos += v.total;
+        info.equipes.push(v);
+        if (v.total > v.limiteEquipe) info.acimaLimite += 1;
+        else if (v.total > v.parametroEquipe) info.acimaParametro += 1;
+        else info.dentroParametro += 1;
+      }
+
+      vinculos.slice(0, 200).forEach(v => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${v.unidade}</td><td>${v.ine || '-'}</td><td>${v.total.toLocaleString('pt-BR')}</td><td>${v.parametroEquipe.toLocaleString('pt-BR')}</td><td>${v.limiteEquipe.toLocaleString('pt-BR')}</td><td><span class="${v.statusClasse}">${v.status}</span></td>`;
+        tabelaBody.appendChild(tr);
+      });
+
+      if (chartVinculos) { chartVinculos.destroy(); chartVinculos = null; }
+      const ctx = canvas.getContext('2d');
+      const unidades = Array.from(resumoPorUnidade.values()).sort((a, b) => b.totalCidadaos - a.totalCidadaos);
+      const labels = unidades.map(u => u.unidade);
+      const dataTotal = unidades.map(u => u.totalCidadaos);
+      const cores = unidades.map(u => {
+        if (u.acimaLimite > 0) return 'rgba(220, 38, 38, 0.85)';
+        else if (u.acimaParametro > 0) return 'rgba(245, 158, 11, 0.85)';
+        else return '#059669';
+      });
+
+      vinculosChartCache = { unidades, labels, dataTotal, cores };
+
+      chartVinculos = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets: [{ label: 'Vinculados', data: dataTotal, backgroundColor: cores, borderRadius: 4 }] },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+          onClick: (_, elements) => {
+            if (!elements || !elements.length) return;
+            const idx = elements[0].index;
+            const unidadeSelecionada = labels[idx];
+            const info = resumoPorUnidade.get(unidadeSelecionada);
+            if (info) mostrarEquipesDaUnidade(unidadeSelecionada, info.equipes);
+          }
+        }
+      });
+    } catch (e) { console.error(e); }
+  }
+
+  // =========================
+  // 6) POP-UP 1: DETALHE DA UNIDADE
+  // =========================
+  function mostrarEquipesDaUnidade(unidade, equipes) {
+    const overlay = document.getElementById('vinculosModalOverlay');
+    const body = document.getElementById('vinculosModalBody');
+    const title = document.getElementById('vinculosModalTitle');
+    const subtitle = document.getElementById('vinculosModalSubtitle');
+
+    if (!overlay || !body) return;
+
+    listaEquipesModalAtual = equipes.sort((a, b) => b.total - a.total);
+
+    title.textContent = `Equipes da unidade: ${unidade}`;
+    title.style.fontSize = '1.25rem';
+    title.style.color = '#111827';
+    subtitle.innerHTML = ''; 
+    
+    const headerEl = document.querySelector('#vinculosModalContent .modal-header');
+    if(headerEl) {
+       headerEl.style.background = '#fff'; headerEl.style.borderBottom = 'none'; headerEl.style.paddingBottom = '0';
+       const closeBtn = headerEl.querySelector('.modal-close');
+       if(closeBtn) closeBtn.style.color = '#374151'; 
+    }
+
+    body.innerHTML = `
+      <p style="color: #6B7280; font-size: 0.9rem; margin-bottom: 2rem;">
+        Detalhamento das equipes desta unidade. Clique sobre o INE ou na barra do gráfico para ver os profissionais.
+      </p>
+      
+      <div style="height: 250px; width: 100%; margin-bottom: 2rem; position: relative;">
+         <canvas id="modalChartEquipes"></canvas>
+      </div>
+
+      <div style="overflow-x: auto; border: 1px solid #E5E7EB; border-radius: 8px;">
+        <table style="width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif;">
+          <thead>
+            <tr style="background-color: #F9FAFB; border-bottom: 1px solid #E5E7EB;">
+              <th style="text-align: left; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">INE</th>
+              <th style="text-align: right; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">PESSOAS</th>
+              <th style="text-align: right; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">PARÂMETRO</th>
+              <th style="text-align: right; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">LIMITE</th>
+              <th style="text-align: left; padding: 12px 16px; font-size: 0.75rem; font-weight: 600; color: #6B7280; text-transform: uppercase;">STATUS</th>
+            </tr>
+          </thead>
+          <tbody style="background-color: #fff;">
+            ${equipes.map((eq, index) => {
+                let statusHtml = '';
+                if (eq.total > eq.limiteEquipe) {
+                  statusHtml = `<span style="color: #DC2626; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;">⚠️ Acima do Limite</span>`;
+                } else if (eq.total > eq.parametroEquipe) {
+                  statusHtml = `<span style="color: #D97706; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L1 21h22L12 2zm1 14h-2v2h2v-2zm0-6h-2v4h2v-4z"/></svg>Acima do Parâmetro</span>`;
+                } else {
+                  statusHtml = `<span style="color: #059669; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 12.17l7.59-7.59L19 6l-9 11z"/></svg>Dentro do Parâmetro</span>`;
+                }
+
+                return `
+                  <tr onclick="abrirModalProfissionais(${index})" style="border-bottom: 1px solid #F3F4F6; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#F9FAFB'" onmouseout="this.style.background='white'">
+                    <td style="padding: 16px; color: #111827; font-size: 0.875rem; font-weight: 500;">
+                       <span style="display:flex; align-items:center; gap:8px;">
+                          ${eq.ine || 'SEM_INE'}
+                          <svg style="width:14px; height:14px; color:#9CA3AF;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                       </span>
+                    </td>
+                    <td style="padding: 16px; text-align: right;">${eq.total.toLocaleString('pt-BR')}</td>
+                    <td style="padding: 16px; text-align: right; color: #374151;">${eq.parametroEquipe.toLocaleString('pt-BR')}</td>
+                    <td style="padding: 16px; text-align: right; color: #374151;">${eq.limiteEquipe.toLocaleString('pt-BR')}</td>
+                    <td style="padding: 16px;">${statusHtml}</td>
+                  </tr>
+                `;
+              }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    overlay.classList.remove('hidden');
+    
+    setTimeout(() => {
+        const modalCanvas = document.getElementById('modalChartEquipes');
+        if (modalCanvas) {
+            if (chartModalEquipesInstance) chartModalEquipesInstance.destroy();
+            const labels = equipes.map(e => e.ine || 'SEM_INE');
+            const dataValues = equipes.map(e => e.total);
+            
+            chartModalEquipesInstance = new Chart(modalCanvas, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{ label: 'Vinculados', data: dataValues, backgroundColor: '#93C5FD', borderColor: '#60A5FA', borderWidth: 1, barPercentage: 0.6 }]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                    scales: { x: { beginAtZero: true, grid: { color: '#F3F4F6' } }, y: { grid: { display: false } } },
+                    onClick: (_, elements) => {
+                        if (!elements || !elements.length) return;
+                        g.abrirModalProfissionais(elements[0].index);
+                    }
+                }
+            });
+        }
+    }, 50);
+
+    const closeBtn = document.getElementById('vinculosModalClose');
+    if (closeBtn) closeBtn.onclick = fecharModalVinculos;
+    overlay.onclick = (e) => { if (e.target === overlay) fecharModalVinculos(); };
+    const escHandler = (e) => { if (e.key === 'Escape') fecharModalVinculos(); };
+    document.addEventListener('keydown', escHandler);
+    window.currentEscHandler = escHandler;
+  }
+
+  function fecharModalVinculos() {
+    const overlay = document.getElementById('vinculosModalOverlay');
+    if (overlay) overlay.classList.add('hidden');
+    if (chartModalEquipesInstance) { chartModalEquipesInstance.destroy(); chartModalEquipesInstance = null; }
+    if (window.currentEscHandler) { document.removeEventListener('keydown', window.currentEscHandler); window.currentEscHandler = null; }
+  }
+
+  function mostrarGraficoVinculosCompleto() {
+    const overlay = document.getElementById('vinculosModalOverlay');
+    const title = document.getElementById('vinculosModalTitle');
+    const body = document.getElementById('vinculosModalBody');
+    if (!overlay || !body || !vinculosChartCache.labels.length) return;
+
+    const headerEl = document.querySelector('#vinculosModalContent .modal-header');
+    if(headerEl) { headerEl.style.background = ''; headerEl.style.borderBottom = ''; headerEl.style.paddingBottom = ''; 
+    const closeBtn = headerEl.querySelector('.modal-close'); if(closeBtn) closeBtn.style.color = ''; }
+
+    title.textContent = 'Vínculos por Equipe - Visão Completa';
+    title.style.color = ''; title.style.fontSize = '';
+    body.innerHTML = `<div class="full-chart-container" style="height: 500px;"><canvas id="chartVinculosFull"></canvas></div>`;
+
+    setTimeout(() => {
+      const fullCanvas = document.getElementById('chartVinculosFull');
+      if (fullCanvas) {
+        if (chartVinculosFull) chartVinculosFull.destroy();
+        const ctxFull = fullCanvas.getContext('2d');
+        chartVinculosFull = new Chart(ctxFull, {
+          type: 'bar',
+          data: { labels: vinculosChartCache.labels, datasets: [{ label: 'Vinculados', data: vinculosChartCache.dataTotal, backgroundColor: vinculosChartCache.cores, borderRadius: 4 }] },
+          options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+      }
+    }, 50);
+
+    overlay.classList.remove('hidden');
+    const closeBtn = document.getElementById('vinculosModalClose');
+    if (closeBtn) closeBtn.onclick = fecharModalVinculos;
+  }
+
+  function configurarModal() {
+    const closeBtn = document.getElementById('vinculosModalClose');
+    const overlay = document.getElementById('vinculosModalOverlay');
+    const expandBtn = document.getElementById('btnExpandirVinculos');
+    if (closeBtn) closeBtn.addEventListener('click', fecharModalVinculos);
+    if (overlay) overlay.addEventListener('click', (e) => { if (e.target === overlay) fecharModalVinculos(); });
+    if (expandBtn) expandBtn.addEventListener('click', mostrarGraficoVinculosCompleto);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', configurarModal);
+  else configurarModal();
+
+  (function integrarComDashboard() {
+    if (!g || typeof g.gerarDashboard !== 'function') return;
+    const originalGerarDashboard = g.gerarDashboard;
+    g.gerarDashboard = function (individuosFiltrados, domiciliosFiltrados) {
+      try { originalGerarDashboard.call(this, individuosFiltrados, domiciliosFiltrados); } catch(e) { console.error(e); }
+      try { detectarMunicipio(); atualizarPainelVinculos(individuosFiltrados); } catch (e) { console.error('Erro ao atualizar painel de vínculos:', e); }
+    };
+  })();
 })();
