@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Demo Geo Vínculos Automático - Vizinho Mais Próximo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#F3F4F6; margin:0; padding:2rem; }
+    .card { max-width: 960px; margin:0 auto; background:#fff; border-radius:0.75rem; padding:1.5rem 1.75rem; box-shadow:0 10px 25px rgba(15,23,42,0.06); }
+    h1 { margin-top:0; font-size:1.4rem; }
+    table { width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem; }
+    th, td { padding:0.5rem 0.75rem; border-bottom:1px solid #E5E7EB; text-align:left; }
+    th { background:#F9FAFB; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.03em; color:#6B7280; }
+    .tag { display:inline-flex; align-items:center; padding:0.2rem 0.55rem; border-radius:999px; font-size:0.75rem; font-weight:500; }
+    .tag-sobrecarga { background:#FEF2F2; color:#B91C1C; }
+    h2 { font-size:1rem; margin-top:1.5rem; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Demo &mdash; Vizinho Mais Próximo Automático</h1>
+    <p style="margin:0; color:#4B5563; font-size:0.9rem;">
+      Esta página é apenas um exemplo isolado para você testar o <strong>geo_vinculos.js</strong> automático.
+      No seu projeto real, o mesmo arquivo será carregado dentro do <strong>index.html</strong> original
+      e usará a tabela de vínculos já existente.
+    </p>
+
+    <section id="tab-vinculos" style="margin-top:1.5rem;">
+      <div class="dashboard-chart-header">
+        <h3>Vínculos por Equipe - MUNICÍPIO EXEMPLO-PB</h3>
+      </div>
+
+      <div style="margin-top:0.75rem; border:1px solid #E5E7EB; border-radius:0.75rem; overflow:hidden; background:#fff;">
+        <table id="tabelaVinculos">
+          <thead>
+            <tr>
+              <th>Unidade</th>
+              <th>INE principal</th>
+              <th>Total de pessoas</th>
+              <th>Situação</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>UNIDADE DE PSF FARM ANTONIO AZEVEDO</td>
+              <td>0000001</td>
+              <td>5200</td>
+              <td><span class="tag tag-sobrecarga">Acima do limite</span></td>
+            </tr>
+            <tr>
+              <td>UBS CENTRO</td>
+              <td>0000002</td>
+              <td>3100</td>
+              <td>Dentro do parâmetro</td>
+            </tr>
+            <tr>
+              <td>UBS BAIRRO NOVO</td>
+              <td>0000003</td>
+              <td>2800</td>
+              <td>Dentro do parâmetro</td>
+            </tr>
+            <tr>
+              <td>USF ZONA RURAL I</td>
+              <td>0000004</td>
+              <td>1900</td>
+              <td>Dentro do parâmetro</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Script de geoprocessamento de vínculos automático -->
+  <script src="geo_vinculos.js"></script>
+</body>
+</html>
